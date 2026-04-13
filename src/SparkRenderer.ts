@@ -1530,32 +1530,29 @@ export class SparkRenderer extends THREE.Mesh {
     const DISPOSE_TIMEOUT_MS = 3000;
     const now = performance.now();
 
-    let oldest = null;
+    const stale: {
+      splats: PackedSplats | ExtSplats | PagedSplats;
+      lodId: number;
+    }[] = [];
     for (const [splats, record] of this.lodIds.entries()) {
-      if (oldest == null || record.lastTouched < oldest.lastTouched) {
-        oldest = {
-          splats,
-          lastTouched: record.lastTouched,
-          lodId: record.lodId,
-        };
-      }
-    }
-    if (!oldest || oldest.lastTouched > now - DISPOSE_TIMEOUT_MS) {
-      return;
-    }
-
-    this.lodIds.delete(oldest.splats);
-    this.lodIdToSplats.delete(oldest.lodId);
-
-    for (const [mesh, instance] of this.lodInstances.entries()) {
-      if (instance.lodId === oldest.lodId) {
-        instance.texture.dispose();
-        this.lodInstances.delete(mesh);
+      if (record.lastTouched <= now - DISPOSE_TIMEOUT_MS) {
+        stale.push({ splats, lodId: record.lodId });
       }
     }
 
-    await worker.call("disposeLodTree", { lodId: oldest.lodId });
-    // console.log("disposed lodTree", oldest.lodId);
+    for (const { splats, lodId } of stale) {
+      this.lodIds.delete(splats);
+      this.lodIdToSplats.delete(lodId);
+
+      for (const [mesh, instance] of this.lodInstances.entries()) {
+        if (instance.lodId === lodId) {
+          instance.texture.dispose();
+          this.lodInstances.delete(mesh);
+        }
+      }
+
+      await worker.call("disposeLodTree", { lodId });
+    }
   }
 
   private updateLodIndices(
